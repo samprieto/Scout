@@ -1,26 +1,56 @@
 import { NextResponse } from "next/server";
 
+function decodeJwt(token: string) {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf-8"));
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
 export async function GET() {
   const srKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-  const triggerKey = process.env.TRIGGER_SECRET_KEY ?? "";
+
+  const srPayload = decodeJwt(srKey);
+  const anonPayload = decodeJwt(anonKey);
+
+  // Make a direct REST call to Supabase to test the key
+  let supabaseTest: { status: number; body: string } | null = null;
+  try {
+    const res = await fetch(`${url}/rest/v1/scout_jobs?limit=1`, {
+      headers: {
+        apikey: srKey,
+        Authorization: `Bearer ${srKey}`,
+      },
+    });
+    const body = await res.text();
+    supabaseTest = { status: res.status, body: body.slice(0, 300) };
+  } catch (e) {
+    supabaseTest = { status: 0, body: String(e) };
+  }
 
   return NextResponse.json({
-    supabase_url: { present: !!url, prefix: url.slice(0, 40) },
+    supabase_url: { present: !!url, value: url },
     service_role_key: {
       present: !!srKey,
       length: srKey.length,
       prefix: srKey.slice(0, 10),
       dot_count: (srKey.match(/\./g) ?? []).length,
       is_jwt: srKey.startsWith("eyJ") && (srKey.match(/\./g) ?? []).length === 2,
+      payload: srPayload,
     },
     anon_key: {
       present: !!anonKey,
       length: anonKey.length,
       prefix: anonKey.slice(0, 10),
       is_jwt: anonKey.startsWith("eyJ") && (anonKey.match(/\./g) ?? []).length === 2,
+      payload: anonPayload,
     },
-    trigger_key: { present: !!triggerKey, prefix: triggerKey.slice(0, 8) },
+    supabase_live_test: supabaseTest,
   });
 }
