@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseAdmin } from "@/lib/supabase";
 import type { SearchMode } from "@/lib/types";
 
 export async function POST(req: NextRequest) {
@@ -11,18 +10,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Title and location are required" }, { status: 400 });
     }
 
-    // Diagnostic: log key shapes (first 12 chars only, never the full key)
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "(missing)";
-    const srKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "(missing)";
-    console.log("[scout] SUPABASE_URL prefix:", url.slice(0, 30));
-    console.log("[scout] SERVICE_ROLE_KEY prefix:", srKey.slice(0, 12), "| length:", srKey.length);
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    const supabase = getSupabaseAdmin();
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error("Supabase env vars not set");
+    }
 
-    // Insert job row
-    const { data: row, error } = await supabase
-      .from("scout_jobs")
-      .insert({
+    // Insert job row via direct REST (bypasses SDK auth issues)
+    const insertRes = await fetch(`${supabaseUrl}/rest/v1/scout_jobs`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": supabaseKey,
+        "Authorization": `Bearer ${supabaseKey}`,
+        "Prefer": "return=representation",
+      },
+      body: JSON.stringify({
         title: title.trim(),
         location: location.trim(),
         context: context.trim(),
@@ -30,17 +34,19 @@ export async function POST(req: NextRequest) {
         status: "queued",
         status_message: "Queued...",
         progress: 0,
-      })
-      .select("id")
-      .single();
+      }),
+    });
 
-    if (error || !row) {
-      throw new Error(error?.message ?? "Failed to create job");
+    if (!insertRes.ok) {
+      const errText = await insertRes.text();
+      throw new Error(`Supabase insert error: ${insertRes.status} ${errText}`);
     }
 
-    const jobId = row.id as string;
+    const inserted = await insertRes.json() as { id: string }[];
+    const jobId = inserted[0]?.id;
+    if (!jobId) throw new Error("No job ID returned from insert");
 
-    // Trigger the background pipeline via REST API (bypasses SDK auth issues)
+    // Trigger the background pipeline
     const secretKey = process.env.TRIGGER_SECRET_KEY;
     if (!secretKey) throw new Error("TRIGGER_SECRET_KEY is not set");
 
@@ -71,11 +77,16 @@ export async function POST(req: NextRequest) {
 
     const triggerData = await triggerRes.json() as { id: string };
 
-    // Save the trigger run ID
-    await supabase
-      .from("scout_jobs")
-      .update({ trigger_run_id: triggerData.id })
-      .eq("id", jobId);
+    // Save the trigger run ID via direct REST
+    await fetch(`${supabaseUrl}/rest/v1/scout_jobs?id=eq.${jobId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": supabaseKey,
+        "Authorization": `Bearer ${supabaseKey}`,
+      },
+      body: JSON.stringify({ trigger_run_id: triggerData.id }),
+    });
 
     return NextResponse.json({ jobId });
   } catch (err) {
