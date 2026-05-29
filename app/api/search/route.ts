@@ -1,11 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { configure, tasks } from "@trigger.dev/sdk/v3";
 import type { SearchMode } from "@/lib/types";
-
-configure({
-  secretKey: process.env.TRIGGER_SECRET_KEY ?? "",
-});
 
 export async function POST(req: NextRequest) {
   try {
@@ -39,19 +34,41 @@ export async function POST(req: NextRequest) {
 
     const jobId = row.id as string;
 
-    // Trigger the background pipeline
-    const handle = await tasks.trigger("scout-pipeline", {
-      jobId,
-      title: title.trim(),
-      location: location.trim(),
-      context: context.trim(),
-      mode,
-    });
+    // Trigger the background pipeline via REST API (bypasses SDK auth issues)
+    const secretKey = process.env.TRIGGER_SECRET_KEY;
+    if (!secretKey) throw new Error("TRIGGER_SECRET_KEY is not set");
+
+    const triggerRes = await fetch(
+      `https://api.trigger.dev/api/v1/tasks/scout-pipeline/trigger`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${secretKey}`,
+        },
+        body: JSON.stringify({
+          payload: {
+            jobId,
+            title: title.trim(),
+            location: location.trim(),
+            context: context.trim(),
+            mode,
+          },
+        }),
+      }
+    );
+
+    if (!triggerRes.ok) {
+      const errText = await triggerRes.text();
+      throw new Error(`Trigger.dev error: ${triggerRes.status} ${errText}`);
+    }
+
+    const triggerData = await triggerRes.json() as { id: string };
 
     // Save the trigger run ID
     await supabase
       .from("scout_jobs")
-      .update({ trigger_run_id: handle.id })
+      .update({ trigger_run_id: triggerData.id })
       .eq("id", jobId);
 
     return NextResponse.json({ jobId });
