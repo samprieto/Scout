@@ -144,7 +144,7 @@ async function searchExa(queries: string[], maxProfiles: number): Promise<ExaRes
           numResults: 10,
           type: "neural",
           includeDomains: ["linkedin.com"],
-          contents: { text: { maxCharacters: 3000 } },
+          text: { maxCharacters: 3000 },
         });
         return (result.results ?? []).map(r => ({
           url: r.url,
