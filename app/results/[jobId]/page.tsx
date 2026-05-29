@@ -1,12 +1,12 @@
 "use client";
-import { use, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ScoutJob } from "@/lib/types";
 import ProgressView from "@/components/ProgressView";
 import ResultsView from "@/components/ResultsView";
 
-export default function ResultsPage({ params }: { params: Promise<{ jobId: string }> }) {
-  const { jobId } = use(params);
+export default function ResultsPage({ params }: { params: { jobId: string } }) {
+  const { jobId } = params;
   const router = useRouter();
   const [job, setJob] = useState<ScoutJob | null>(null);
   const [error, setError] = useState<string | null>(null);
