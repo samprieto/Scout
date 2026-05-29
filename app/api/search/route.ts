@@ -11,6 +11,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Title and location are required" }, { status: 400 });
     }
 
+    // Diagnostic: log key shapes (first 12 chars only, never the full key)
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "(missing)";
+    const srKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "(missing)";
+    console.log("[scout] SUPABASE_URL prefix:", url.slice(0, 30));
+    console.log("[scout] SERVICE_ROLE_KEY prefix:", srKey.slice(0, 12), "| length:", srKey.length);
+
     const supabase = getSupabaseAdmin();
 
     // Insert job row
