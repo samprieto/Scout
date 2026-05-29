@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { tasks } from "@trigger.dev/sdk/v3";
+import { configure, tasks } from "@trigger.dev/sdk/v3";
 import type { SearchMode } from "@/lib/types";
+
+configure({
+  secretKey: process.env.TRIGGER_SECRET_KEY ?? "",
+});
 
 export async function POST(req: NextRequest) {
   try {
