@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
 function decodeJwt(token: string) {
   try {
@@ -52,5 +53,13 @@ export async function GET() {
       payload: anonPayload,
     },
     supabase_live_test: supabaseTest,
+    createclient_test: (() => {
+      try {
+        createClient(url, srKey, { auth: { persistSession: false } });
+        return "OK - no error thrown";
+      } catch (e) {
+        return `ERROR: ${String(e)}`;
+      }
+    })(),
   });
 }
