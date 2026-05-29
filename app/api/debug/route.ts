@@ -53,6 +53,42 @@ export async function GET() {
       payload: anonPayload,
     },
     supabase_live_test: supabaseTest,
+    insert_test: await (async () => {
+      try {
+        const res = await fetch(`${url}/rest/v1/scout_jobs`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": srKey,
+            "Authorization": `Bearer ${srKey}`,
+            "Prefer": "return=representation",
+          },
+          body: JSON.stringify({
+            title: "__debug_test__",
+            location: "__debug__",
+            context: "",
+            mode: "quick",
+            status: "queued",
+            status_message: "debug",
+            progress: 0,
+          }),
+        });
+        const body = await res.text();
+        // Clean up if it inserted
+        if (res.ok) {
+          const rows = JSON.parse(body) as { id: string }[];
+          if (rows[0]?.id) {
+            await fetch(`${url}/rest/v1/scout_jobs?id=eq.${rows[0].id}`, {
+              method: "DELETE",
+              headers: { "apikey": srKey, "Authorization": `Bearer ${srKey}` },
+            });
+          }
+        }
+        return { status: res.status, body: body.slice(0, 200) };
+      } catch (e) {
+        return { status: 0, body: String(e) };
+      }
+    })(),
     createclient_test: (() => {
       try {
         createClient(url, srKey, { auth: { persistSession: false } });
