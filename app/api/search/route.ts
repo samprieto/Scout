@@ -39,16 +39,16 @@ export async function POST(req: NextRequest) {
 
     if (!insertRes.ok) {
       const errText = await insertRes.text();
-      throw new Error(`Supabase insert error: ${insertRes.status} ${errText}`);
+      throw new Error(`[Step 1 - Supabase insert] ${insertRes.status}: ${errText}`);
     }
 
     const inserted = await insertRes.json() as { id: string }[];
     const jobId = inserted[0]?.id;
-    if (!jobId) throw new Error("No job ID returned from insert");
+    if (!jobId) throw new Error("[Step 1 - Supabase insert] No job ID returned");
 
     // Trigger the background pipeline
     const secretKey = process.env.TRIGGER_SECRET_KEY;
-    if (!secretKey) throw new Error("TRIGGER_SECRET_KEY is not set");
+    if (!secretKey) throw new Error("[Step 2 - Trigger.dev] TRIGGER_SECRET_KEY is not set");
 
     const triggerRes = await fetch(
       `https://api.trigger.dev/api/v1/tasks/scout-pipeline/trigger`,
@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
 
     if (!triggerRes.ok) {
       const errText = await triggerRes.text();
-      throw new Error(`Trigger.dev error: ${triggerRes.status} ${errText}`);
+      throw new Error(`[Step 2 - Trigger.dev] ${triggerRes.status}: ${errText}`);
     }
 
     const triggerData = await triggerRes.json() as { id: string };

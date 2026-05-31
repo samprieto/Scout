@@ -13,6 +13,7 @@ export default function ResultsPage({ params }: { params: { jobId: string } }) {
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
+    let done = false;
 
     async function poll() {
       try {
@@ -21,6 +22,7 @@ export default function ResultsPage({ params }: { params: { jobId: string } }) {
         const data = await res.json() as ScoutJob;
         setJob(data);
         if (data.status === "complete" || data.status === "error") {
+          done = true;
           clearInterval(interval);
         }
       } catch {
@@ -28,9 +30,27 @@ export default function ResultsPage({ params }: { params: { jobId: string } }) {
       }
     }
 
+    // Poll every 3s while the tab is active
     poll();
     interval = setInterval(poll, 3000);
-    return () => clearInterval(interval);
+
+    // Re-poll immediately when the tab becomes visible again (fixes browser throttling)
+    function handleVisibility() {
+      if (!document.hidden && !done) poll();
+    }
+    // Also re-poll on window focus (covers switching back from another app)
+    function handleFocus() {
+      if (!done) poll();
+    }
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleFocus);
+    };
   }, [jobId]);
 
   if (error) {

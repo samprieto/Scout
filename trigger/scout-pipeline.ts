@@ -50,9 +50,12 @@ const MODE_CONFIG = {
 async function dbPatch(jobId: string, patch: Record<string, unknown>): Promise<void> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return;
+  if (!url || !key) {
+    console.error("dbPatch: missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+    return;
+  }
   try {
-    await fetch(`${url}/rest/v1/scout_jobs?id=eq.${jobId}`, {
+    const res = await fetch(`${url}/rest/v1/scout_jobs?id=eq.${jobId}`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
@@ -60,10 +63,16 @@ async function dbPatch(jobId: string, patch: Record<string, unknown>): Promise<v
         Authorization: `Bearer ${key}`,
         Prefer: "return=minimal",
       },
-      body: JSON.stringify({ ...patch, last_heartbeat_at: new Date().toISOString() }),
+      body: JSON.stringify(patch),
       signal: AbortSignal.timeout(8_000),
     });
-  } catch { /* best-effort */ }
+    if (!res.ok) {
+      const text = await res.text();
+      console.error(`dbPatch failed: ${res.status} ${text}`);
+    }
+  } catch (e) {
+    console.error("dbPatch error:", e);
+  }
 }
 
 async function callClaude(
@@ -134,6 +143,86 @@ Return JSON: { "queries": ["query1", "query2", ...] }`,
   ];
 }
 
+/**
+ * Build a set of lowercase location keywords from a freeform location string.
+ * e.g. "Salt Lake City, Utah, US" → ["salt lake", "utah", "ut", "us", "united states"]
+ */
+function buildLocationKeywords(location: string): string[] {
+  const loc = location.toLowerCase();
+  const keywords = new Set<string>();
+
+  // Always include the raw location tokens
+  loc.split(/[,\s]+/).forEach(token => {
+    const t = token.trim();
+    if (t.length >= 2) keywords.add(t);
+  });
+
+  // US state abbreviation → full name mappings (common ones)
+  const stateMap: Record<string, string[]> = {
+    ut: ["utah"],
+    ca: ["california"],
+    ny: ["new york"],
+    tx: ["texas"],
+    fl: ["florida"],
+    wa: ["washington"],
+    or: ["oregon"],
+    co: ["colorado"],
+    az: ["arizona"],
+    nv: ["nevada"],
+    id: ["idaho"],
+    mt: ["montana"],
+    wy: ["wyoming"],
+    nm: ["new mexico"],
+    il: ["illinois"],
+    oh: ["ohio"],
+    mi: ["michigan"],
+    ga: ["georgia"],
+    nc: ["north carolina"],
+    va: ["virginia"],
+    ma: ["massachusetts"],
+    pa: ["pennsylvania"],
+    mn: ["minnesota"],
+    mo: ["missouri"],
+    wi: ["wisconsin"],
+    in: ["indiana"],
+    tn: ["tennessee"],
+    md: ["maryland"],
+    ok: ["oklahoma"],
+    ks: ["kansas"],
+  };
+
+  // If location contains a known abbreviation, add the full name too (and vice versa)
+  for (const [abbr, names] of Object.entries(stateMap)) {
+    if (loc.includes(abbr) || names.some(n => loc.includes(n))) {
+      keywords.add(abbr);
+      names.forEach(n => keywords.add(n));
+    }
+  }
+
+  return Array.from(keywords);
+}
+
+/**
+ * Filter Exa results to only keep profiles that mention the target location.
+ * Uses the Exa text snippet (LinkedIn profile excerpt) for matching.
+ * Returns up to maxProfiles results. If filtering would return 0 results,
+ * falls back to the original list (better some results than none).
+ */
+function filterByLocation(results: ExaResult[], location: string, maxProfiles: number): ExaResult[] {
+  const keywords = buildLocationKeywords(location);
+  if (keywords.length === 0) return results.slice(0, maxProfiles);
+
+  const filtered = results.filter(r => {
+    const haystack = ((r.text ?? "") + " " + (r.title ?? "")).toLowerCase();
+    return keywords.some(kw => haystack.includes(kw));
+  });
+
+  // Fallback: if filtering kills everything, return original (unfiltered) list
+  const pool = filtered.length > 0 ? filtered : results;
+  console.log(`Location filter: ${results.length} → ${filtered.length} (keywords: ${keywords.slice(0, 5).join(", ")})`);
+  return pool.slice(0, maxProfiles);
+}
+
 async function searchExa(queries: string[], maxProfiles: number): Promise<ExaResult[]> {
   const exa = new Exa(process.env.EXA_API_KEY!);
 
@@ -180,7 +269,7 @@ async function enrichProfile(url: string): Promise<NinjaPearProfile | null> {
 
   try {
     const res = await fetch(
-      `https://nubela.co/proxycurl/api/v2/linkedin?linkedin_profile_url=${encodeURIComponent(url)}&use_cache=if-present`,
+      `https://nubela.co/proxycurl/api/v2/linkedin?linkedin_profile_url=${encodeURIComponent(url)}&use_cache=if-recent`,
       {
         headers: { Authorization: `Bearer ${key}` },
         signal: AbortSignal.timeout(20_000),
@@ -264,9 +353,10 @@ Scoring criteria (be strict and conservative):
 - 4 = Strong: Title clearly matches, solid relevant experience, plausible location fit
 - 3 = Possible: Adjacent role or transferable skills, some gaps
 - 2 = Weak: Tangential relevance, significant gaps
-- 1 = No fit: Wrong field, student with no experience, unrelated role
+- 1 = No fit: Wrong field, student with no experience, unrelated role, OR clearly in a different geographic region than ${location}
 
-Only score 4-5 when profile data provides CLEAR DIRECT EVIDENCE of qualification.
+IMPORTANT: If a candidate's location is clearly different from ${location} (different state, country, or major metro area), cap their score at 2 regardless of qualifications.
+Only score 4-5 when profile data provides CLEAR DIRECT EVIDENCE of both role qualification AND geographic fit.
 
 Return a JSON array:
 [{
@@ -329,19 +419,18 @@ async function verifyTopCandidates(
 
 ${candidateList}
 
-For each candidate, confirm or adjust their score (4 or 5 only — remove any that don't genuinely qualify).
-Be thorough in your assessment. Consider:
-- Does the title/role actually match what we're hiring for?
-- Is the experience level appropriate?
-- Is the location a genuine fit?
+For each candidate, assign a final score 1-5. Be fair and inclusive — if someone has relevant experience or a related title, give them the benefit of the doubt. Consider:
+- Does the title/role match or closely relate to what we're hiring for?
+- Is the experience level reasonable?
+- Is the location a plausible fit?
 
 Return JSON array with same structure: [{
   "name": "...", "current_title": "...", "current_company": "...",
-  "location": "...", "profile_url": "...", "score": 4 or 5,
+  "location": "...", "profile_url": "...", "score": 3-5,
   "reason": "verified assessment..."
 }]
 
-Only include candidates that genuinely deserve 4 or 5. It's better to return fewer high-quality results.`,
+Include all candidates with score 3 or above. Aim to return at least 10 candidates if the data supports it.`,
       "claude-sonnet-4-5",
       4096
     );
@@ -351,11 +440,11 @@ Only include candidates that genuinely deserve 4 or 5. It's better to return few
 
     // Map back to original candidates with verified scores
     return arr
-      .filter(c => c.score >= 4)
+      .filter(c => c.score >= 3)
       .map((c, i) => ({
         ...candidates[i],
         ...c,
-        score: Math.max(4, Math.min(5, Number(c.score) || 4)),
+        score: Math.max(3, Math.min(5, Number(c.score) || 3)),
       }));
   } catch {
     return candidates;
@@ -387,8 +476,11 @@ export const scoutPipeline = task({
         status_message: `Running ${queries.length} searches...`,
       });
 
-      const exaResults = await searchExa(queries, config.maxProfiles);
-      console.log(`Found ${exaResults.length} candidate URLs`);
+      const rawExaResults = await searchExa(queries, config.maxProfiles * 3); // fetch extra before filtering
+      console.log(`Found ${rawExaResults.length} candidate URLs before location filter`);
+
+      const exaResults = filterByLocation(rawExaResults, location, config.maxProfiles);
+      console.log(`After location filter: ${exaResults.length} candidates`);
 
       if (exaResults.length === 0) {
         await dbPatch(jobId, {
@@ -462,8 +554,9 @@ export const scoutPipeline = task({
 
       // Step 5: Filter to 4+ and verify with Claude Sonnet
       const topCandidates = allScored
-        .filter(c => c.score >= 4)
-        .sort((a, b) => b.score - a.score);
+        .filter(c => c.score >= 3)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 30); // cap at 30 for verification
 
       await dbPatch(jobId, {
         progress: 85,
