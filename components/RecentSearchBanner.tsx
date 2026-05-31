@@ -59,7 +59,9 @@ export default function RecentSearchBanner() {
   const [searches, setSearches] = useState<RecentSearch[]>([]);
 
   useEffect(() => {
-    setSearches(getRecentSearches());
+    // Filter out any stale entries with invalid job IDs (must be a UUID)
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    setSearches(getRecentSearches().filter(s => UUID_RE.test(s.jobId)));
   }, []);
 
   function dismiss(jobId: string, e: React.MouseEvent) {
