@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: { jobId: string } }
@@ -17,6 +19,7 @@ export async function GET(
     const res = await fetch(
       `${supabaseUrl}/rest/v1/scout_jobs?id=eq.${encodeURIComponent(jobId)}&limit=1`,
       {
+        cache: "no-store",
         headers: {
           "apikey": supabaseKey,
           "Authorization": `Bearer ${supabaseKey}`,
