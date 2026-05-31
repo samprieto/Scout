@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ScoutJob } from "@/lib/types";
+import { updateRecentSearchStatus } from "@/lib/recentSearches";
 import ProgressView from "@/components/ProgressView";
 import ResultsView from "@/components/ResultsView";
 
@@ -21,6 +22,8 @@ export default function ResultsPage({ params }: { params: { jobId: string } }) {
         if (!res.ok) { setError("Job not found"); return; }
         const data = await res.json() as ScoutJob;
         setJob(data);
+        // Keep localStorage in sync so the homepage "resume" banner stays accurate
+        updateRecentSearchStatus(jobId, data.status, data.status_message ?? undefined);
         if (data.status === "complete" || data.status === "error") {
           done = true;
           clearInterval(interval);

@@ -27,6 +27,7 @@ export interface ScoutJob {
   error: string | null;
   last_heartbeat_at: string | null;
   trigger_run_id: string | null;
+  req_number: string | null;
 }
 
 export interface ModeConfig {

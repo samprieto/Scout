@@ -3,8 +3,8 @@ import type { SearchMode } from "@/lib/types";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as { title: string; location: string; context?: string; mode: SearchMode };
-    const { title, location, context = "", mode } = body;
+    const body = await req.json() as { title: string; location: string; context?: string; mode: SearchMode; reqNumber?: string | null };
+    const { title, location, context = "", mode, reqNumber = null } = body;
 
     if (!title?.trim() || !location?.trim()) {
       return NextResponse.json({ error: "Title and location are required" }, { status: 400 });
@@ -31,6 +31,7 @@ export async function POST(req: NextRequest) {
         location: location.trim(),
         context: context.trim(),
         mode,
+        req_number: reqNumber ?? null,
         status: "queued",
         status_message: "Queued...",
         progress: 0,

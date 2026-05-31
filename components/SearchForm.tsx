@@ -3,9 +3,12 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { SearchMode } from "@/lib/types";
 import { MODE_CONFIGS } from "@/lib/types";
+import { getRecentSearches, getNextReqNumber } from "@/lib/recentSearches";
+import type { RecentSearch } from "@/lib/recentSearches";
 
 export default function SearchForm() {
   const router = useRouter();
+  const [reqBase, setReqBase] = useState("");       // what the user types, e.g. "2133"
   const [title, setTitle] = useState("");
   const [location, setLocation] = useState("");
   const [context, setContext] = useState("");
@@ -13,20 +16,48 @@ export default function SearchForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Compute a live preview of what the req number will become
+  const reqPreview = reqBase.trim() ? getNextReqNumber(reqBase) : null;
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim() || !location.trim()) return;
     setLoading(true);
     setError(null);
 
+    // Lock in the req number at submit time (re-compute to avoid race)
+    const reqNumber = reqBase.trim() ? getNextReqNumber(reqBase) : null;
+
     try {
       const res = await fetch("/api/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, location, context, mode }),
+        body: JSON.stringify({ title, location, context, mode, reqNumber }),
       });
       const data = await res.json() as { jobId?: string; error?: string };
       if (!res.ok) throw new Error(data.error ?? "Failed to start search");
+
+      // Persist job so the homepage can show a "resume" link if the tab is closed
+      if (data.jobId) {
+        try {
+          const existing = getRecentSearches();
+          const entry: RecentSearch = {
+            jobId: data.jobId,
+            title: title.trim(),
+            location: location.trim(),
+            mode,
+            createdAt: new Date().toISOString(),
+            status: "queued",
+            statusMessage: "Queued...",
+            reqNumber: reqNumber ?? undefined,
+          };
+          localStorage.setItem(
+            "scout_recent_searches",
+            JSON.stringify([entry, ...existing.filter(s => s.jobId !== data.jobId)].slice(0, 10))
+          );
+        } catch { /* localStorage unavailable */ }
+      }
+
       router.push(`/results/${data.jobId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -36,6 +67,33 @@ export default function SearchForm() {
 
   return (
     <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-6">
+
+      {/* Req # */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Req # <span className="text-gray-400 font-normal">(optional)</span>
+        </label>
+        <div className="flex items-center gap-3">
+          <input
+            type="text"
+            value={reqBase}
+            onChange={e => setReqBase(e.target.value)}
+            placeholder="e.g. 2133"
+            className="w-40 px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500"
+          />
+          {reqPreview && (
+            <div className="flex items-center gap-2">
+              <span className="text-gray-400 text-sm">→</span>
+              <span className="bg-sky-50 border border-sky-200 text-sky-700 font-mono font-semibold text-sm px-3 py-1.5 rounded-lg">
+                {reqPreview}
+              </span>
+              <span className="text-xs text-gray-400">will be assigned</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Role Title */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">Role Title</label>
         <input
@@ -48,6 +106,7 @@ export default function SearchForm() {
         />
       </div>
 
+      {/* Location */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">Location</label>
         <input
@@ -60,6 +119,7 @@ export default function SearchForm() {
         />
       </div>
 
+      {/* Context */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
           Key Skills / Job Description <span className="text-gray-400 font-normal">(optional)</span>
@@ -73,6 +133,7 @@ export default function SearchForm() {
         />
       </div>
 
+      {/* Search Mode */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-3">Search Mode</label>
         <div className="grid grid-cols-3 gap-3">

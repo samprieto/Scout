@@ -1,4 +1,5 @@
 import SearchForm from "@/components/SearchForm";
+import RecentSearchBanner from "@/components/RecentSearchBanner";
 
 export default function Home() {
   return (
@@ -13,6 +14,7 @@ export default function Home() {
           <h1 className="text-4xl font-bold text-gray-900">Scout</h1>
           <p className="text-gray-500 mt-2">AI-powered recruiting sourcing</p>
         </div>
+        <RecentSearchBanner />
         <SearchForm />
       </div>
     </main>
